@@ -145,6 +145,38 @@ pnpm preview
 
 ---
 
+## 🐳 Docker Containerization
+
+The project is fully containerized using a multi-stage Alpine build (`Node.js 22` build stage + `Nginx Alpine` high-performance HTTP server).
+
+### Quick Start with Docker Compose
+```bash
+# Option 1: Using the convenience script
+./deploy-docker.sh
+
+# Option 2: Using docker compose directly
+docker compose up -d --build
+```
+Your containerized portfolio will be accessible at **[http://localhost:3000](http://localhost:3000)**.
+
+### Useful Docker Commands
+```bash
+# View running container status
+docker compose ps
+
+# View container logs
+docker compose logs -f
+
+# Stop container
+docker compose down
+
+# Standalone Docker build & run
+docker build -t peter-portfolio .
+docker run -d -p 3000:80 --name peter-portfolio peter-portfolio
+```
+
+---
+
 ## 📬 EmailJS Configuration (Optional)
 
 To receive contact form submissions directly in your inbox:

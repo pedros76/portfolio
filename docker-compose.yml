@@ -1,0 +1,20 @@
+services:
+  portfolio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_NVIDIA_API_KEY: ${VITE_NVIDIA_API_KEY:-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}
+        VITE_NVIDIA_MODEL: ${VITE_NVIDIA_MODEL:-meta/llama-3.2-11b-vision-instruct}
+    container_name: peter-portfolio
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
