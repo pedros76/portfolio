@@ -1,31 +1,35 @@
 #!/usr/bin/env bash
 set -e
 
-echo "🚀 Building and starting Peter Kiplagat Misik Portfolio Docker Container..."
+echo "🚀 Building and deploying Peter Kiplagat Misik Portfolio Docker Container..."
 
 # Load .env if present
 if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
 fi
 
-# Determine docker compose command
+DOCKER_BIN=$(command -v docker || command -v podman)
+
+echo "📦 Using Engine: $DOCKER_BIN"
+
+# Build image with native engine
+$DOCKER_BIN build -t peter-portfolio:latest \
+  --build-arg VITE_NVIDIA_API_KEY="${VITE_NVIDIA_API_KEY}" \
+  --build-arg VITE_NVIDIA_MODEL="${VITE_NVIDIA_MODEL:-meta/llama-3.2-11b-vision-instruct}" \
+  .
+
+# Run container via Compose or standalone Docker
 if command -v docker-compose &> /dev/null; then
-  COMPOSE_CMD="docker-compose"
+  docker-compose up -d
 elif docker compose version &> /dev/null; then
-  COMPOSE_CMD="docker compose"
-elif command -v podman-compose &> /dev/null; then
-  COMPOSE_CMD="podman-compose"
+  docker compose up -d
 else
-  COMPOSE_CMD="docker compose"
+  $DOCKER_BIN stop peter-portfolio 2>/dev/null || true
+  $DOCKER_BIN rm peter-portfolio 2>/dev/null || true
+  $DOCKER_BIN run -d --name peter-portfolio -p 3000:80 --restart unless-stopped peter-portfolio:latest
 fi
-
-echo "📦 Using Compose Command: $COMPOSE_CMD"
-
-# Build and start container in detached mode
-$COMPOSE_CMD up -d --build
 
 echo ""
 echo "✅ Portfolio is running in Docker!"
 echo "🌐 Access URL: http://localhost:3000"
-echo "📊 Container status: $COMPOSE_CMD ps"
-echo "📜 View logs:       $COMPOSE_CMD logs -f"
+echo "📊 Container status: $DOCKER_BIN ps"

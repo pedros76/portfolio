@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Peter Kiplagat Misik Portfolio
 # Stage 1: Build production bundle
-FROM node:22-alpine AS builder
+FROM docker.io/library/node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -25,7 +25,8 @@ ENV VITE_NVIDIA_MODEL=$VITE_NVIDIA_MODEL
 RUN pnpm build
 
 # Stage 2: Production HTTP server using lightweight Nginx
-FROM nginx:alpine AS runner
+FROM docker.io/library/nginx:alpine AS runner
+
 
 # Remove default nginx website
 RUN rm -rf /usr/share/nginx/html/*
