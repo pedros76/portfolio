@@ -28,6 +28,12 @@ const SUGGESTED_PROMPTS = [
   "Can I download Peter's CV?"
 ];
 
+let msgIdCounter = 0;
+const createMessageId = (prefix: string) => {
+  msgIdCounter += 1;
+  return `${prefix}-${msgIdCounter}-${Math.random().toString(36).slice(2, 7)}`;
+};
+
 export const AiAssistant: React.FC = () => {
   const navigate = useNavigate();
   const { openResumeModal } = useResume();
@@ -60,7 +66,7 @@ export const AiAssistant: React.FC = () => {
     if (!query || isTyping) return;
 
     const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: createMessageId('user'),
       sender: 'user',
       text: query,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -73,7 +79,7 @@ export const AiAssistant: React.FC = () => {
     try {
       const response = await generateAiResponse(query, messages);
       const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
+        id: createMessageId('assistant'),
         sender: 'assistant',
         text: response.text,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -84,7 +90,7 @@ export const AiAssistant: React.FC = () => {
       setMessages((prev) => [
         ...prev,
         {
-          id: `err-${Date.now()}`,
+          id: createMessageId('err'),
           sender: 'assistant',
           text: `I encountered an unexpected issue while retrieving that information. Please feel free to reach out to Peter directly on WhatsApp at ${PERSONAL_INFO.phone}.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -230,7 +236,7 @@ export const AiAssistant: React.FC = () => {
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 </h3>
                 <p className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
-                  Google Gemini AI • Multi-Key Load Balanced • RAG Enabled
+                  Google Gemini AI • Auto-Rotating Keys & Failover • RAG Enabled
                 </p>
               </div>
             </div>

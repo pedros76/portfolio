@@ -18,44 +18,255 @@ export interface ChatMessage {
   };
 }
 
-// Google Gemini API Keys Pool configured via environment variables (.env / VITE_GEMINI_API_KEYS)
-const DEFAULT_GEMINI_API_KEYS: string[] = [];
-
-// Helper to retrieve all configured keys from env or defaults
-const getApiKeyPool = (): string[] => {
-  const envKeysRaw = import.meta.env.VITE_GEMINI_API_KEYS;
-  const singleKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-  if (envKeysRaw && typeof envKeysRaw === 'string') {
-    const parsed = envKeysRaw
-      .split(',')
-      .map((k: string) => k.trim())
-      .filter((k: string) => k.length > 0);
-    if (parsed.length > 0) return parsed;
-  }
-
-  if (singleKey && typeof singleKey === 'string' && singleKey.trim().length > 0) {
-    return [singleKey.trim(), ...DEFAULT_GEMINI_API_KEYS.filter((k) => k !== singleKey.trim())];
-  }
-
-  return DEFAULT_GEMINI_API_KEYS;
-};
-
-// Pointer for round-robin rotation across requests
-let activeKeyIndex = 0;
+interface KeyHealthState {
+  key: string;
+  preview: string;
+  cooldownUntil: number;
+  consecutiveFailures: number;
+  isPermanentlyDown: boolean;
+  lastErrorReason?: string;
+}
 
 /**
- * Returns API keys ordered starting from the current rotation index.
- * This distributes load and provides instant failover to remaining keys.
+ * Mask key for secure logging in client console
  */
-const getOrderedKeys = (): string[] => {
-  const pool = getApiKeyPool();
-  const ordered: string[] = [];
-  for (let i = 0; i < pool.length; i++) {
-    ordered.push(pool[(activeKeyIndex + i) % pool.length]);
-  }
-  return ordered;
+const maskKey = (key: string): string => {
+  if (!key || key.length < 8) return '****';
+  return `${key.slice(0, 6)}...${key.slice(-4)}`;
 };
+
+/**
+ * Auto-discover Gemini API keys from all supported environment variable formats:
+ * - VITE_GEMINI_API_KEYS (comma, space, or newline-separated)
+ * - VITE_GEMINI_API_KEY (single key)
+ * - VITE_GEMINI_API_KEY_1 through VITE_GEMINI_API_KEY_10 (numbered keys)
+ */
+const discoverApiKeys = (): string[] => {
+  const keys: string[] = [];
+
+  // 1. Multi-key comma/newline/space separated string
+  const rawMulti = import.meta.env.VITE_GEMINI_API_KEYS;
+  if (typeof rawMulti === 'string' && rawMulti.trim().length > 0) {
+    rawMulti
+      .split(/[,\n\r\s]+/)
+      .map((k: string) => k.trim())
+      .filter((k: string) => k.length > 10 && !k.includes('your_gemini_api_key'))
+      .forEach((k: string) => keys.push(k));
+  }
+
+  // 2. Single key
+  const rawSingle = import.meta.env.VITE_GEMINI_API_KEY;
+  if (typeof rawSingle === 'string' && rawSingle.trim().length > 0) {
+    const trimmed = rawSingle.trim();
+    if (trimmed.length > 10 && !trimmed.includes('your_gemini_api_key')) {
+      keys.push(trimmed);
+    }
+  }
+
+  // 3. Numbered keys (VITE_GEMINI_API_KEY_1 .. 10)
+  for (let i = 1; i <= 10; i++) {
+    const val = (import.meta.env as Record<string, string | undefined>)[`VITE_GEMINI_API_KEY_${i}`];
+    if (typeof val === 'string' && val.trim().length > 0) {
+      const trimmed = val.trim();
+      if (trimmed.length > 10 && !trimmed.includes('your_gemini_api_key')) {
+        keys.push(trimmed);
+      }
+    }
+  }
+
+  // Deduplicate keys while preserving order
+  return Array.from(new Set(keys));
+};
+
+/**
+ * Intelligent Key Rotation & Automatic Failover Circuit Breaker
+ * Automatically rotates keys on success (load balancing) and
+ * immediately switches to the next healthy key when one is down (failover).
+ */
+class KeyRotationManager {
+  private keyStates: KeyHealthState[] = [];
+  private activeIndex: number = 0;
+  private readonly STORAGE_INDEX_KEY = 'peter_portfolio_gemini_key_index';
+
+  constructor() {
+    this.initPool();
+  }
+
+  public initPool() {
+    const rawKeys = discoverApiKeys();
+    this.keyStates = rawKeys.map((key) => ({
+      key,
+      preview: maskKey(key),
+      cooldownUntil: 0,
+      consecutiveFailures: 0,
+      isPermanentlyDown: false
+    }));
+
+    // Restore previously working key index from sessionStorage if valid
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const saved = sessionStorage.getItem(this.STORAGE_INDEX_KEY);
+        if (saved !== null) {
+          const parsed = parseInt(saved, 10);
+          if (!isNaN(parsed) && parsed >= 0 && parsed < this.keyStates.length) {
+            this.activeIndex = parsed;
+          }
+        }
+      }
+    } catch {
+      // sessionStorage unavailable
+    }
+
+    if (this.keyStates.length > 0) {
+      console.log(
+        `[AI Key Rotator] Initialized pool with ${this.keyStates.length} keys. Active starting key: [${this.activeIndex + 1}/${this.keyStates.length}] (${this.keyStates[this.activeIndex].preview})`
+      );
+    }
+  }
+
+  public getPoolSize(): number {
+    return this.keyStates.length;
+  }
+
+  /**
+   * Returns keys ordered starting from the current active key,
+   * prioritizing healthy keys and automatically falling through to the rest.
+   */
+  public getExecutableKeyQueue(): KeyHealthState[] {
+    if (this.keyStates.length === 0) return [];
+
+    const now = Date.now();
+    // Exclude permanently disabled keys unless ALL keys were disabled
+    let candidates = this.keyStates.filter((k) => !k.isPermanentlyDown);
+    if (candidates.length === 0) {
+      // Emergency unblock in case keys recovered
+      this.keyStates.forEach((k) => {
+        k.isPermanentlyDown = false;
+        k.cooldownUntil = 0;
+      });
+      candidates = [...this.keyStates];
+    }
+
+    // Partition into immediately ready vs currently on cooldown
+    const ready: KeyHealthState[] = [];
+    const coolingDown: KeyHealthState[] = [];
+
+    for (let i = 0; i < candidates.length; i++) {
+      const idx = (this.activeIndex + i) % candidates.length;
+      const item = candidates[idx];
+      if (item.cooldownUntil <= now) {
+        ready.push(item);
+      } else {
+        coolingDown.push(item);
+      }
+    }
+
+    // Sort cooling-down keys by earliest cooldown expiration
+    coolingDown.sort((a, b) => a.cooldownUntil - b.cooldownUntil);
+
+    return [...ready, ...coolingDown];
+  }
+
+  /**
+   * Called when a key successfully completes an API request.
+   * Clears failure state and advances the active pointer to balance the load.
+   */
+  public recordSuccess(key: string) {
+    const item = this.keyStates.find((k) => k.key === key);
+    if (!item) return;
+
+    item.consecutiveFailures = 0;
+    item.cooldownUntil = 0;
+    item.isPermanentlyDown = false;
+    item.lastErrorReason = undefined;
+
+    const idx = this.keyStates.indexOf(item);
+    // Advance active key index to the next key to distribute load
+    const nextIndex = (idx + 1) % this.keyStates.length;
+    this.setActiveIndex(nextIndex);
+
+    console.log(
+      `[AI Key Rotator] ✅ Succeeded with key [${idx + 1}/${this.keyStates.length}] (${item.preview}). Auto-rotated to key [${nextIndex + 1}/${this.keyStates.length}].`
+    );
+  }
+
+  /**
+   * Called when an API request fails on a key.
+   * Immediately puts the key on cooldown and advances active pointer to the next key.
+   */
+  public recordFailure(key: string, statusCode?: number, errorDetails?: string) {
+    const item = this.keyStates.find((k) => k.key === key);
+    if (!item) return;
+
+    item.consecutiveFailures += 1;
+    item.lastErrorReason = errorDetails || `HTTP ${statusCode || 'Network Error'}`;
+    const now = Date.now();
+    const idx = this.keyStates.indexOf(item);
+
+    let cooldownSec = 45;
+    let reason = 'unknown';
+
+    if (statusCode === 429) {
+      // Rate limit / Quota exceeded for this minute
+      cooldownSec = 90;
+      reason = 'Rate limit (429 RESOURCE_EXHAUSTED)';
+      item.cooldownUntil = now + cooldownSec * 1000;
+    } else if (statusCode === 503 || statusCode === 502 || statusCode === 504 || statusCode === 500) {
+      // Server high demand or temporary overload
+      cooldownSec = 45;
+      reason = `Server overload (${statusCode} UNAVAILABLE)`;
+      item.cooldownUntil = now + cooldownSec * 1000;
+    } else if (statusCode === 400 || statusCode === 401) {
+      // Invalid API key
+      reason = `Invalid key (${statusCode})`;
+      item.isPermanentlyDown = true;
+      item.cooldownUntil = now + 3600 * 1000;
+    } else if (statusCode === 403) {
+      // Forbidden / Project quota blocked
+      cooldownSec = 180;
+      reason = 'Forbidden/Quota exhausted (403)';
+      item.cooldownUntil = now + cooldownSec * 1000;
+    } else {
+      // Network timeout / connection drop
+      cooldownSec = 30;
+      reason = 'Network/timeout failure';
+      item.cooldownUntil = now + cooldownSec * 1000;
+    }
+
+    // Immediately advance activeIndex so next request starts with the next key
+    const nextIndex = (idx + 1) % this.keyStates.length;
+    this.setActiveIndex(nextIndex);
+
+    console.warn(
+      `[AI Key Rotator] ⚠️ Key [${idx + 1}/${this.keyStates.length}] (${item.preview}) is DOWN: ${reason}. Cooldown: ${cooldownSec}s. Auto-switching to key [${nextIndex + 1}/${this.keyStates.length}]...`
+    );
+  }
+
+  private setActiveIndex(index: number) {
+    this.activeIndex = index;
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.setItem(this.STORAGE_INDEX_KEY, String(index));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  public getStats() {
+    const now = Date.now();
+    return {
+      totalKeys: this.keyStates.length,
+      activeIndex: this.activeIndex,
+      healthyKeys: this.keyStates.filter((k) => !k.isPermanentlyDown && k.cooldownUntil <= now).length,
+      coolingDownKeys: this.keyStates.filter((k) => !k.isPermanentlyDown && k.cooldownUntil > now).length,
+      disabledKeys: this.keyStates.filter((k) => k.isPermanentlyDown).length
+    };
+  }
+}
+
+// Global singleton instance for key rotation
+export const keyRotator = new KeyRotationManager();
 
 // Complete RAG Context compiled from verified portfolio data
 const RAG_SYSTEM_PROMPT = `You are the official AI Representative and Virtual Assistant for Peter Kiplagat Misik.
@@ -182,18 +393,29 @@ const determineAction = (query: string, responseText: string): ChatMessage['acti
 };
 
 /**
- * Generate AI Response using Google Gemini API with multi-key load balancing,
- * automatic failover across keys, and resilient local fallback.
+ * Generate AI Response using Google Gemini API with automatic key rotation,
+ * dynamic failover when a key is down, and resilient local RAG fallback.
  */
 export const generateAiResponse = async (
   query: string,
   history: { sender: 'user' | 'assistant'; text: string }[] = []
 ): Promise<{ text: string; action?: ChatMessage['action'] }> => {
-  const keys = getOrderedKeys();
+  const keyQueue = keyRotator.getExecutableKeyQueue();
+
+  // If no API keys are configured, seamlessly answer using rich offline RAG
+  if (keyQueue.length === 0) {
+    console.info('[AI Assistant] No Gemini API keys configured in environment. Using local RAG knowledge base.');
+    return getFallbackRAGResponse(query);
+  }
+
   const primaryModel = import.meta.env.VITE_GEMINI_MODEL || 'gemini-3.5-flash-lite';
-  const candidateModels = [primaryModel, 'gemini-3.1-flash-lite', 'gemini-3.8-flash'].filter(
-    (val, idx, arr) => arr.indexOf(val) === idx
-  );
+  const candidateModels = [
+    primaryModel,
+    'gemini-3.5-flash-lite',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash',
+    'gemini-flash-latest'
+  ].filter((val, idx, arr) => arr.indexOf(val) === idx);
 
   // Construct Gemini conversation payload with history & RAG instructions
   const contents: Array<{ role: 'user' | 'model'; parts: { text: string }[] }> = [];
@@ -228,16 +450,18 @@ export const generateAiResponse = async (
 
   let lastError: unknown = null;
 
-  // Attempt requests across the pool of API keys (failover & load balancing)
-  for (let kIdx = 0; kIdx < keys.length; kIdx++) {
-    const key = keys[kIdx];
+  // Attempt requests across the pool of API keys (instant auto-failover when one is down)
+  for (let kIdx = 0; kIdx < keyQueue.length; kIdx++) {
+    const keyItem = keyQueue[kIdx];
+    const key = keyItem.key;
+    let switchedKey = false;
 
     for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
       const model = candidateModels[mIdx];
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       try {
         const response = await fetch(endpoint, {
@@ -255,41 +479,57 @@ export const generateAiResponse = async (
           const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
           if (replyText) {
-            // Update active rotation index to distribute future queries across keys
-            activeKeyIndex = (activeKeyIndex + kIdx + 1) % keys.length;
+            // Success! Record healthy state and advance active key for load distribution
+            keyRotator.recordSuccess(key);
             const action = determineAction(query, replyText);
             return { text: replyText, action };
           }
         }
 
         const errorText = await response.text();
-        console.warn(
-          `Gemini API returned status ${response.status} on key [${kIdx + 1}/${keys.length}] model ${model}:`,
-          errorText
-        );
         lastError = new Error(`HTTP ${response.status}: ${errorText}`);
 
-        // If rate limit (429) or quota error (403), switch immediately to the next key
-        if (response.status === 429 || response.status === 403) {
-          break;
+        // If the model itself was not found (404), try the next candidate model on the same key
+        if (response.status === 404) {
+          console.warn(`[AI Key Rotator] Model ${model} not available on key ${keyItem.preview}. Trying next model...`);
+          continue;
         }
-      } catch (networkErr) {
+
+        // For rate-limit (429), high demand / server overload (503, 500, 502), or auth error (400, 401, 403):
+        // Mark this key down and immediately switch to the next key in the pool!
+        keyRotator.recordFailure(key, response.status, errorText);
+        switchedKey = true;
+        break; // break candidate models loop to try next key immediately
+      } catch (networkErr: unknown) {
         clearTimeout(timeoutId);
-        console.warn(`Request failed on key [${kIdx + 1}/${keys.length}] model ${model}:`, networkErr);
+        const errMsg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+        console.warn(`[AI Key Rotator] Request error on key ${keyItem.preview} with model ${model}: ${errMsg}`);
         lastError = networkErr;
-        // Continue to next model or key
+
+        // If network error or timeout, record failure and auto-switch to next key
+        keyRotator.recordFailure(key, 0, errMsg);
+        switchedKey = true;
+        break; // break candidate models loop to try next key immediately
       }
+    }
+
+    if (switchedKey) {
+      // The current key failed and was marked down; loop automatically continues to keyQueue[kIdx + 1]
+      continue;
     }
   }
 
-  console.error('All Gemini API keys and models exhausted. Using resilient fallback knowledge base:', lastError);
+  console.warn(
+    `[AI Key Rotator] All ${keyQueue.length} API keys are currently down or experiencing temporary high demand. Seamlessly answering via local RAG knowledge base.`,
+    lastError
+  );
   return getFallbackRAGResponse(query);
 };
 
 // Resilient local RAG fallback in case of offline mode or temporary network disconnect
 const getFallbackRAGResponse = async (query: string): Promise<{ text: string; action?: ChatMessage['action'] }> => {
   const q = query.toLowerCase().trim();
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new Promise((resolve) => setTimeout(resolve, 250));
 
   if (q.includes('cv') || q.includes('resume') || q.includes('curriculum') || q.includes('download')) {
     return {
