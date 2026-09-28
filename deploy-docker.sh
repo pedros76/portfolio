@@ -14,8 +14,8 @@ echo "📦 Using Engine: $DOCKER_BIN"
 
 # Build image with native engine
 $DOCKER_BIN build -t peter-portfolio:latest \
-  --build-arg VITE_NVIDIA_API_KEY="${VITE_NVIDIA_API_KEY}" \
-  --build-arg VITE_NVIDIA_MODEL="${VITE_NVIDIA_MODEL:-meta/llama-3.2-11b-vision-instruct}" \
+  --build-arg VITE_GEMINI_API_KEYS="${VITE_GEMINI_API_KEYS}" \
+  --build-arg VITE_GEMINI_MODEL="${VITE_GEMINI_MODEL:-gemini-3.5-flash-lite}" \
   .
 
 # Run container via Compose or standalone Docker

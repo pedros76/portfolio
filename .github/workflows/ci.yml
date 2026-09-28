@@ -44,8 +44,8 @@ jobs:
       - name: Type check and Build
         run: pnpm build
         env:
-          VITE_NVIDIA_API_KEY: ${{ secrets.VITE_NVIDIA_API_KEY }}
-          VITE_NVIDIA_MODEL: meta/llama-3.2-11b-vision-instruct
+          VITE_GEMINI_API_KEYS: ${{ secrets.VITE_GEMINI_API_KEYS }}
+          VITE_GEMINI_MODEL: gemini-3.5-flash-lite
 
   docker:
     name: Docker Build & Verification
@@ -67,5 +67,5 @@ jobs:
           push: false
           tags: peter-portfolio:latest
           build-args: |
-            VITE_NVIDIA_API_KEY=${{ secrets.VITE_NVIDIA_API_KEY }}
-            VITE_NVIDIA_MODEL=meta/llama-3.2-11b-vision-instruct
+            VITE_GEMINI_API_KEYS=${{ secrets.VITE_GEMINI_API_KEYS }}
+            VITE_GEMINI_MODEL=gemini-3.5-flash-lite

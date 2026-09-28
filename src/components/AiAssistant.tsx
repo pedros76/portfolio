@@ -127,6 +127,61 @@ export const AiAssistant: React.FC = () => {
     }
   };
 
+  // Helper to render basic markdown formatting cleanly
+  const renderFormattedText = (text: string) => {
+    const lines = text.split('\n');
+    return lines.map((line, idx) => {
+      const bulletMatch = line.match(/^(\s*)[*•-]\s+(.*)$/);
+      if (bulletMatch) {
+        return (
+          <div key={idx} className="flex items-start gap-2 my-1 pl-1">
+            <span className="text-emerald-500 font-bold shrink-0">•</span>
+            <span>{renderInlineFormatting(bulletMatch[2])}</span>
+          </div>
+        );
+      }
+      const numberMatch = line.match(/^(\s*)(\d+\.)\s+(.*)$/);
+      if (numberMatch) {
+        return (
+          <div key={idx} className="flex items-start gap-2 my-1 pl-1">
+            <span className="text-emerald-500 font-mono font-semibold shrink-0">{numberMatch[2]}</span>
+            <span>{renderInlineFormatting(numberMatch[3])}</span>
+          </div>
+        );
+      }
+      const headerMatch = line.match(/^#{1,4}\s+(.*)$/);
+      if (headerMatch) {
+        return (
+          <div key={idx} className="font-bold text-neutral-900 dark:text-emerald-400 mt-2 mb-1">
+            {renderInlineFormatting(headerMatch[1])}
+          </div>
+        );
+      }
+      if (!line.trim()) {
+        return <div key={idx} className="h-1.5" />;
+      }
+      return (
+        <div key={idx} className="my-0.5">
+          {renderInlineFormatting(line)}
+        </div>
+      );
+    });
+  };
+
+  const renderInlineFormatting = (text: string) => {
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return (
+          <strong key={i} className="font-semibold text-neutral-900 dark:text-white">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return part;
+    });
+  };
+
   const handleClearChat = () => {
     setMessages([
       {
@@ -175,7 +230,7 @@ export const AiAssistant: React.FC = () => {
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 </h3>
                 <p className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
-                  NVIDIA Llama 3.2 NIM • RAG Enabled
+                  Google Gemini AI • Multi-Key Load Balanced • RAG Enabled
                 </p>
               </div>
             </div>
@@ -223,7 +278,11 @@ export const AiAssistant: React.FC = () => {
                             : 'bg-white dark:bg-neutral-900 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-800 shadow-sm'
                         }`}
                       >
-                        <div className="whitespace-pre-line">{msg.text}</div>
+                        {isUser ? (
+                          <div className="whitespace-pre-line">{msg.text}</div>
+                        ) : (
+                          <div>{renderFormattedText(msg.text)}</div>
+                        )}
                       </div>
 
                       {/* Interactive Action Button in Assistant Message */}

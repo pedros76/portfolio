@@ -5,8 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VITE_NVIDIA_API_KEY: ${VITE_NVIDIA_API_KEY:-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}
-        VITE_NVIDIA_MODEL: ${VITE_NVIDIA_MODEL:-meta/llama-3.2-11b-vision-instruct}
+        VITE_GEMINI_API_KEYS: ${VITE_GEMINI_API_KEYS:-}
+        VITE_GEMINI_MODEL: ${VITE_GEMINI_MODEL:-gemini-2.5-flash}
     container_name: peter-portfolio
     restart: unless-stopped
     ports:
