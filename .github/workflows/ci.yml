@@ -41,11 +41,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Type check and Build
+      - name: Type check and Build (Frontend & Backend)
         run: pnpm build
-        env:
-          VITE_GEMINI_API_KEYS: ${{ secrets.VITE_GEMINI_API_KEYS }}
-          VITE_GEMINI_MODEL: gemini-3.5-flash-lite
 
   docker:
     name: Docker Build & Verification
@@ -59,13 +56,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: actions/setup-buildx-action@v3
 
-      - name: Build Docker Image
+      - name: Build Backend Docker Image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
+          file: ./backend/Dockerfile
           push: false
-          tags: peter-portfolio:latest
-          build-args: |
-            VITE_GEMINI_API_KEYS=${{ secrets.VITE_GEMINI_API_KEYS }}
-            VITE_GEMINI_MODEL=gemini-3.5-flash-lite
+          tags: peter-portfolio-backend:latest
+
+      - name: Build Frontend Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./frontend/Dockerfile
+          push: false
+          tags: peter-portfolio-frontend:latest

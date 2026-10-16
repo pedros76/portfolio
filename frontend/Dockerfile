@@ -1,36 +1,26 @@
-# Multi-stage Dockerfile for Peter Kiplagat Misik Portfolio
-# Stage 1: Build production bundle
+# Multi-stage Dockerfile for Portfolio Frontend (React 19 + Vite)
 FROM docker.io/library/node:22-alpine AS builder
 
 WORKDIR /app
 
 # Enable pnpm via corepack
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
-# Copy dependency manifests
-COPY package.json pnpm-lock.yaml ./
+# Copy root workspace manifests
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY frontend/package.json ./frontend/
 
 # Install dependencies strictly
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter frontend
 
-# Copy source code and config
-COPY . .
+# Copy frontend source and configs
+COPY frontend ./frontend
 
 # Build Vite React app for production
-ARG VITE_GEMINI_API_KEYS
-ARG VITE_GEMINI_MODEL=gemini-3.5-flash-lite
-ARG VITE_NVIDIA_API_KEY
-ARG VITE_NVIDIA_MODEL
-ENV VITE_GEMINI_API_KEYS=$VITE_GEMINI_API_KEYS
-ENV VITE_GEMINI_MODEL=$VITE_GEMINI_MODEL
-ENV VITE_NVIDIA_API_KEY=$VITE_NVIDIA_API_KEY
-ENV VITE_NVIDIA_MODEL=$VITE_NVIDIA_MODEL
-
-RUN pnpm build
+RUN pnpm --filter frontend build
 
 # Stage 2: Production HTTP server using lightweight Nginx
 FROM docker.io/library/nginx:alpine AS runner
-
 
 # Remove default nginx website
 RUN rm -rf /usr/share/nginx/html/*
@@ -39,7 +29,7 @@ RUN rm -rf /usr/share/nginx/html/*
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy production build artifacts from builder
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/frontend/dist /usr/share/nginx/html
 
 # Expose port 80
 EXPOSE 80
@@ -48,5 +38,4 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
 
-# Start Nginx server
 CMD ["nginx", "-g", "daemon off;"]

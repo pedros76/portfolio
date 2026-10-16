@@ -1,21 +1,42 @@
 services:
-  portfolio:
-    image: peter-portfolio:latest
+  backend:
     build:
       context: .
-      dockerfile: Dockerfile
-      args:
-        VITE_GEMINI_API_KEYS: ${VITE_GEMINI_API_KEYS:-}
-        VITE_GEMINI_MODEL: ${VITE_GEMINI_MODEL:-gemini-2.5-flash}
-    container_name: peter-portfolio
+      dockerfile: backend/Dockerfile
+    container_name: peter-portfolio-backend
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "5000:5000"
     environment:
       - NODE_ENV=production
+      - PORT=5000
+      - GEMINI_API_KEYS=${GEMINI_API_KEYS:-${VITE_GEMINI_API_KEYS:-}}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - EMAILJS_SERVICE_ID=${EMAILJS_SERVICE_ID:-${VITE_EMAILJS_SERVICE_ID:-}}
+      - EMAILJS_TEMPLATE_ID=${EMAILJS_TEMPLATE_ID:-${VITE_EMAILJS_TEMPLATE_ID:-}}
+      - EMAILJS_PUBLIC_KEY=${EMAILJS_PUBLIC_KEY:-${VITE_EMAILJS_PUBLIC_KEY:-}}
+      - EMAILJS_PRIVATE_KEY=${EMAILJS_PRIVATE_KEY:-}
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: peter-portfolio-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

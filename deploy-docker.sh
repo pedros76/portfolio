@@ -1,35 +1,40 @@
 #!/usr/bin/env bash
 set -e
 
-echo "🚀 Building and deploying Peter Kiplagat Misik Portfolio Docker Container..."
+echo "🚀 Building and deploying Peter Kiplagat Misik Portfolio (Frontend & Backend)..."
 
 # Load .env if present
 if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
 fi
 
-DOCKER_BIN=$(command -v docker || command -v podman)
-
-echo "📦 Using Engine: $DOCKER_BIN"
-
-# Build image with native engine
-$DOCKER_BIN build -t peter-portfolio:latest \
-  --build-arg VITE_GEMINI_API_KEYS="${VITE_GEMINI_API_KEYS}" \
-  --build-arg VITE_GEMINI_MODEL="${VITE_GEMINI_MODEL:-gemini-3.5-flash-lite}" \
-  .
-
-# Run container via Compose or standalone Docker
+# Detect Compose or Container engine
 if command -v docker-compose &> /dev/null; then
-  docker-compose up -d
+  COMPOSE_CMD="docker-compose"
 elif docker compose version &> /dev/null; then
-  docker compose up -d
+  COMPOSE_CMD="docker compose"
+elif podman compose version &> /dev/null; then
+  COMPOSE_CMD="podman compose"
 else
-  $DOCKER_BIN stop peter-portfolio 2>/dev/null || true
-  $DOCKER_BIN rm peter-portfolio 2>/dev/null || true
-  $DOCKER_BIN run -d --name peter-portfolio -p 3000:80 --restart unless-stopped peter-portfolio:latest
+  COMPOSE_CMD=""
+fi
+
+if [ -n "$COMPOSE_CMD" ]; then
+  echo "📦 Using Compose engine: $COMPOSE_CMD"
+  $COMPOSE_CMD build
+  $COMPOSE_CMD up -d
+else
+  DOCKER_BIN=$(command -v docker || command -v podman)
+  echo "📦 Using Container engine: $DOCKER_BIN"
+  $DOCKER_BIN build -f backend/Dockerfile -t peter-portfolio-backend:latest .
+  $DOCKER_BIN build -f frontend/Dockerfile -t peter-portfolio-frontend:latest .
+  $DOCKER_BIN stop peter-portfolio-backend peter-portfolio-frontend 2>/dev/null || true
+  $DOCKER_BIN rm peter-portfolio-backend peter-portfolio-frontend 2>/dev/null || true
+  $DOCKER_BIN run -d --name peter-portfolio-backend -p 5000:5000 --restart unless-stopped peter-portfolio-backend:latest
+  $DOCKER_BIN run -d --name peter-portfolio-frontend -p 3000:80 --restart unless-stopped peter-portfolio-frontend:latest
 fi
 
 echo ""
-echo "✅ Portfolio is running in Docker!"
-echo "🌐 Access URL: http://localhost:3000"
-echo "📊 Container status: $DOCKER_BIN ps"
+echo "✅ Portfolio services are running!"
+echo "🌐 Frontend URL: http://localhost:3000"
+echo "🔌 Backend API URL: http://localhost:5000/api/health"

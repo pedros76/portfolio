@@ -29,6 +29,49 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Structured Data (JSON-LD) for Google Search & Knowledge Graph -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Person",
+          "@id": "https://portfolio-skysos.vercel.app/#person",
+          "name": "Peter Kiplagat Misik",
+          "alternateName": ["Peter Misik", "pedros76"],
+          "jobTitle": "Software Developer & Network Engineer",
+          "nationality": "Kenyan",
+          "alumniOf": {
+            "@type": "EducationalOrganization",
+            "name": "Taita Taveta University"
+          },
+          "url": "https://portfolio-skysos.vercel.app",
+          "sameAs": [
+            "https://github.com/pedros76"
+          ],
+          "knowsAbout": [
+            "Software Engineering",
+            "Python",
+            "React",
+            "Network Engineering",
+            "Cisco Packet Tracer",
+            "Django",
+            "TypeScript"
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://portfolio-skysos.vercel.app/#website",
+          "url": "https://portfolio-skysos.vercel.app",
+          "name": "Peter Kiplagat Misik Portfolio",
+          "publisher": {
+            "@id": "https://portfolio-skysos.vercel.app/#person"
+          }
+        }
+      ]
+    }
+    </script>
   </head>
   <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 antialiased selection:bg-emerald-500 selection:text-black">
     <div id="root"></div>
